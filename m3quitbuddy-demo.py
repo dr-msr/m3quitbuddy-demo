@@ -2,6 +2,12 @@ import streamlit as st
 from openai import OpenAI
 import os
 
+# --- RAG LIBRARIES ---
+# We use these to search our "Knowledge Base" for relevant Malaysian health info
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+from langchain.docstore.document import Document
+
 # ================= CONFIGURATION =================
 st.set_page_config(page_title="M3QuitBuddy", page_icon="🫁")
 
@@ -34,41 +40,79 @@ if not api_key:
 
 client = OpenAI(api_key=api_key)
 
-# ================= REVISED SYSTEM PROMPT (CRITICAL FIXES) =================
+# ================= RAG KNOWLEDGE BASE (MALAYSIA CPG) =================
+# In a real app, you would load this from a PDF file. 
+# For this prototype, we simulate the Malaysian CPG content here.
+MALAYSIA_CPG_TEXT = """
+[TOPIC: VAPING / E-CIGARETTES]
+In Malaysia, e-cigarettes and vaping products are NOT recommended as a smoking cessation aid (replacement therapy).
+The Ministry of Health (MOH) maintains that vaping sustains nicotine addiction and introduces new chemical risks (e.g., EVALI).
+Clinical advice: Advise patients to stop using both cigarettes and vapes completely. Do not suggest switching to vape to quit smoking.
+
+[TOPIC: PHARMACOTHERAPY / MEDICATIONS]
+First-line treatments approved in Malaysia include:
+1. Nicotine Replacement Therapy (NRT): Available as Gum (2mg/4mg), Patch (15mg/10mg/5mg or 21mg/14mg/7mg), and Inhaler.
+   - Protocol: Use for at least 8-12 weeks. Combination therapy (Patch + Gum) is more effective than single use.
+2. Varenicline (Champix): Start 1 week before quit date. Dosing: 0.5mg daily (days 1-3), 0.5mg BD (days 4-7), then 1mg BD for 12 weeks.
+   - Warning: Monitor for neuropsychiatric symptoms.
+3. Bupropion SR: Start 1-2 weeks before quit date. 150mg daily (3 days), then 150mg BD.
+   - Contraindication: History of seizures or eating disorders.
+
+[TOPIC: BEHAVIOURAL THERAPY]
+The 5Rs approach for those not ready to quit: Relevance, Risks, Rewards, Roadblocks, Repetition.
+The STAR method for preparation: Set date, Tell family, Anticipate challenges, Remove tobacco.
+Relapse Prevention: Identify triggers (stress, mamak sessions, boredom) and use 4Ds (Delay, Deep breath, Drink water, Distract).
+
+[TOPIC: REFERRAL SERVICES]
+mQuit Services: A public-private partnership accredited by MOH. Website: jomquit.my.
+Klinik Kesihatan: Most government health clinics have a 'Klinik Berhenti Merokok'.
+"""
+
+@st.cache_resource
+def setup_rag(api_key):
+    """
+    This function creates a searchable database (Vector Store) from the text above.
+    It runs only once to save speed/cost.
+    """
+    embeddings = OpenAIEmbeddings(openai_api_key=api_key)
+    # Split the text into chunks based on the empty lines
+    docs = [Document(page_content=chunk) for chunk in MALAYSIA_CPG_TEXT.split("\n\n") if chunk.strip()]
+    vectorstore = FAISS.from_documents(docs, embeddings)
+    return vectorstore
+
+# Initialize RAG
+try:
+    rag_engine = setup_rag(api_key)
+    st.sidebar.success("📚 Local Health Data Loaded")
+except Exception as e:
+    st.sidebar.error(f"RAG Error: {e}")
+    rag_engine = None
+
+# ================= REVISED SYSTEM PROMPT =================
 BASE_SYSTEM_PROMPT = """
 Role & Identity:
-You are M3QuitBuddy, a peer-support companion for Malaysian youth trying to quit smoking/vaping. 
-Tone: Casual, supportive, uses 'Manglish' (Campur BM/English), slang like 'bro', 'lepak', 'gian', 'member'.
+You are M3QuitBuddy, a peer-support companion for Malaysian youth. 
+Tone: Casual, 'Manglish', supportive.
 
-CORE GUIDELINES (USER-CENTRIC):
-1. FRAMEWORK: Do NOT use "5 As" (that is for doctors). Use the "STAR" method for users:
-   - S: Set a quit date.
-   - T: Tell family/friends (for accountability).
-   - A: Anticipate challenges (what triggers you?).
-   - R: Remove cigarettes/vapes from your room/car.
+INSTRUCTIONS:
+1. RAG USAGE: You have access to context from Malaysian Clinical Practice Guidelines (CPG). 
+   - If the CONTEXT provided below is relevant, USE IT to give accurate medical advice.
+   - If the user asks about meds/vape, prioritize the CONTEXT over general knowledge.
+   
+2. GENERAL GUIDANCE:
+   - VAPING: Not recommended in Malaysia. Advise quitting.
+   - FRAMEWORK: Use STAR (Set, Tell, Anticipate, Remove) for planning.
+   - CRISIS: Use 4Ds (Delay, Deep Breath, Drink Water, Distract).
 
-2. MEDICAL ACCURACY (MALAYSIA CONTEXT):
-   - VAPING: Vaping is NOT a recommended alternative to smoking in Malaysia. It still contains nicotine and harmful chemicals. Encourage quitting all nicotine products completely. If asked, say: "Vape bukan jalan keluar yang selamat, bro. Better kita aim bebas nikotin terus."
-   - COLD TURKEY: It is SAFE to quit abruptly. Nicotine withdrawal is uncomfortable/stressful but NOT physically dangerous (unlike alcohol withdrawal). If a user asks, say it is safe but tough, and suggest coping tips.
-   - SLOW REDUCTION (Tapering): Also a valid method. Let the user choose.
-   - MEDICATIONS: If user < 18, DO NOT suggest NRT (patches/gum). Suggest behavioral tips (4Ds) only.
-
-3. CRISIS TIPS (The 4Ds):
-   - Delay (Tunggu 5 minit, craving will pass).
-   - Deep Breath (Tarik nafas panjang).
-   - Drink Water (Air sejuk shocked system).
-   - Distract (Main game, scroll TikTok).
-
-SAFETY ROUTING:
-- Suicide/Self-Harm: "Bro, bunuh diri bukan jalan penyelesaian. Please call Talian HEAL 15555 or Befrienders 03-7627 2929 immediately."
-- Severe Withdrawal (Shaking, hallucinations): Suggest seeing a doctor at Klinik Kesihatan.
+SAFETY:
+- Under 18: NO MEDS/NRT advice. Behavioral only.
+- Suicide Risk: Refer Talian HEAL 15555 immediately.
 """
 
 # ================= SIDEBAR (RESOURCES & SOS) =================
 with st.sidebar:
     st.title("🫁 M3QuitBuddy")
     st.markdown("Your Malaysian Quit Smoking Companion.")
-    
     st.divider()
     
     # SOS BUTTON
@@ -90,7 +134,6 @@ with st.sidebar:
     st.markdown("### 🏥 Resources")
     st.markdown("- **mQuit Services:** [jomquit.my](https://jomquit.my)")
     st.markdown("- **Talian HEAL:** 15555")
-    st.markdown("- **Befrienders:** 03-7627 2929")
     
     if st.button("Reset Chat"):
         st.session_state.step = "onboarding_age"
@@ -106,12 +149,22 @@ def handle_chat_response(user_input):
     with st.chat_message("user"):
         st.markdown(user_input)
 
+    # --- RAG RETRIEVAL STEP ---
+    retrieved_context = ""
+    if rag_engine:
+        # Search for the 2 most relevant chunks from our CPG text
+        docs = rag_engine.similarity_search(user_input, k=2)
+        retrieved_context = "\n\n".join([d.page_content for d in docs])
+    
     # Build Prompt with Context
-    profile_str = f"\nUSER PROFILE: Age {st.session_state.profile.get('age')}, Habit: {st.session_state.profile.get('habit')}, Readiness: {st.session_state.profile.get('readiness')}/10."
+    profile_str = f"\nUSER PROFILE: Age {st.session_state.profile.get('age')}, Habit: {st.session_state.profile.get('habit')}."
     if st.session_state.profile.get('is_minor'):
         profile_str += " [WARNING: USER IS UNDER 18. NO MEDICATION ADVICE.]"
 
-    messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT + profile_str}] + st.session_state.messages
+    # Inject the RAG context into the prompt
+    full_prompt = f"{BASE_SYSTEM_PROMPT}\n\n{profile_str}\n\nRELEVANT MALAYSIAN GUIDELINES (CONTEXT):\n{retrieved_context}"
+
+    messages = [{"role": "system", "content": full_prompt}] + st.session_state.messages
 
     # Generate AI Response
     with st.chat_message("assistant"):
@@ -179,5 +232,5 @@ elif st.session_state.step == "chat_active":
             st.markdown(msg["content"])
 
     # Chat Input
-    if prompt := st.chat_input("Tanya apa je... (e.g., 'Bahaya ke stop mengejut?')"):
+    if prompt := st.chat_input("Tanya apa je... (e.g., 'Nak try ubat patch?')"):
         handle_chat_response(prompt)
