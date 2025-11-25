@@ -17,44 +17,50 @@ st.markdown("""
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "step" not in st.session_state:
-    st.session_state.step = "onboarding_age" # Start with onboarding
+    st.session_state.step = "onboarding_age" 
 if "profile" not in st.session_state:
     st.session_state.profile = {}
 
 # ================= API SETUP =================
-# Try to get key from secrets, env, or user input
 api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    # Check Streamlit secrets
-    if "OPENAI_API_KEY" in st.secrets:
-        api_key = st.secrets["OPENAI_API_KEY"]
-    else:
-        # Ask user in sidebar if no key found
-        api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+if not api_key and "OPENAI_API_KEY" in st.secrets:
+    api_key = st.secrets["OPENAI_API_KEY"]
 
 if not api_key:
-    st.warning("Please enter an OpenAI API Key in the sidebar to continue.")
-    st.stop()
+    api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+    if not api_key:
+        st.warning("Please enter an OpenAI API Key to continue.")
+        st.stop()
 
 client = OpenAI(api_key=api_key)
 
-# ================= SYSTEM PROMPT =================
+# ================= REVISED SYSTEM PROMPT (CRITICAL FIXES) =================
 BASE_SYSTEM_PROMPT = """
 Role & Identity:
-You are M3QuitBuddy, a supportive smoking cessation companion for Malaysian youth.
-Tone: Friendly, uses 'Manglish' (Campur BM/English), slang like 'bro', 'lepak', 'gian'.
-Core Goal: Help users quit using 5As (Ask, Advise, Assess, Assist, Arrange) and 5Rs.
+You are M3QuitBuddy, a peer-support companion for Malaysian youth trying to quit smoking/vaping. 
+Tone: Casual, supportive, uses 'Manglish' (Campur BM/English), slang like 'bro', 'lepak', 'gian', 'member'.
 
-Safety:
-- If user < 18: DO NOT suggest NRT/Meds. Focus on behavioral tips only.
-- Suicide/Self-Harm: IMMEDIATELY refer to Talian HEAL 15555 or Befrienders KL.
-- Medical Emergency: Tell them to call 999.
+CORE GUIDELINES (USER-CENTRIC):
+1. FRAMEWORK: Do NOT use "5 As" (that is for doctors). Use the "STAR" method for users:
+   - S: Set a quit date.
+   - T: Tell family/friends (for accountability).
+   - A: Anticipate challenges (what triggers you?).
+   - R: Remove cigarettes/vapes from your room/car.
 
-Crisis Tips (4D):
-1. Delay (Tunggu 5 minit)
-2. Deep Breath (Tarik nafas)
-3. Drink Water (Minum air sejuk)
-4. Distract (Buat benda lain)
+2. MEDICAL ACCURACY:
+   - COLD TURKEY: It is SAFE to quit abruptly. Nicotine withdrawal is uncomfortable/stressful but NOT physically dangerous (unlike alcohol withdrawal). If a user asks, say it is safe but tough, and suggest coping tips.
+   - SLOW REDUCTION (Tapering): Also a valid method. Let the user choose.
+   - MEDICATIONS: If user < 18, DO NOT suggest NRT (patches/gum). Suggest behavioral tips (4Ds) only.
+
+3. CRISIS TIPS (The 4Ds):
+   - Delay (Tunggu 5 minit, craving will pass).
+   - Deep Breath (Tarik nafas panjang).
+   - Drink Water (Air sejuk shocked system).
+   - Distract (Main game, scroll TikTok).
+
+SAFETY ROUTING:
+- Suicide/Self-Harm: "Bro, bunuh diri bukan jalan penyelesaian. Please call Talian HEAL 15555 or Befrienders 03-7627 2929 immediately."
+- Severe Withdrawal (Shaking, hallucinations): Suggest seeing a doctor at Klinik Kesihatan.
 """
 
 # ================= SIDEBAR (RESOURCES & SOS) =================
@@ -65,16 +71,16 @@ with st.sidebar:
     st.divider()
     
     # SOS BUTTON
-    st.error("🚨 CRAVING ATTACK? (SOS)")
-    if st.button("I NEED HELP NOW"):
+    st.error("🚨 GIAN TERUK? (SOS)")
+    if st.button("BANTU SAYA SEKARANG"):
         sos_msg = (
             "🚨 **SOS MODE ACTIVATED** 🚨\n\n"
-            "Relaks bro/sis. Tarik nafas dalam-dalam... Hembus...\n\n"
-            "**Try the 4D Trick now:**\n"
-            "1. 🧊 **Drink** air sejuk.\n"
-            "2. ⏳ **Delay** 5 minit je.\n"
-            "3. 🎮 **Distract** diri (Main game kejap).\n\n"
-            "You boleh buat ni. Jangan kalah dengan gian!"
+            "Relaks bro. Tarik nafas dalam-dalam... Hembus...\n\n"
+            "**Buat '4D' ni sekarang:**\n"
+            "1. 🧊 **Drink** air sejuk (Ice water).\n"
+            "2. ⏳ **Delay** 5 minit je. Gian tu ombak, dia akan surut.\n"
+            "3. 🎮 **Distract** (Main game, basuh muka).\n\n"
+            "You boleh buat ni. Jangan kalah!"
         )
         st.session_state.messages.append({"role": "assistant", "content": sos_msg})
         st.rerun()
@@ -100,7 +106,10 @@ def handle_chat_response(user_input):
         st.markdown(user_input)
 
     # Build Prompt with Context
-    profile_str = f"\nUSER CONTEXT: {st.session_state.profile}"
+    profile_str = f"\nUSER PROFILE: Age {st.session_state.profile.get('age')}, Habit: {st.session_state.profile.get('habit')}, Readiness: {st.session_state.profile.get('readiness')}/10."
+    if st.session_state.profile.get('is_minor'):
+        profile_str += " [WARNING: USER IS UNDER 18. NO MEDICATION ADVICE.]"
+
     messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT + profile_str}] + st.session_state.messages
 
     # Generate AI Response
@@ -117,7 +126,7 @@ def handle_chat_response(user_input):
 # --- STEP 1: AGE ---
 if st.session_state.step == "onboarding_age":
     st.header("👋 Welcome, Bro/Sis!")
-    st.write("Before we start, I need to know a bit about you to give the right advice.")
+    st.write("Sebelum kita mula, nak kenal sikit boleh? (Data ni private, don't worry).")
     
     age = st.number_input("Umur berapa? (Age)", min_value=10, max_value=100, value=20)
     if st.button("Next ➡️", key="btn_age"):
@@ -129,10 +138,10 @@ if st.session_state.step == "onboarding_age":
 # --- STEP 2: HABIT ---
 elif st.session_state.step == "onboarding_habit":
     st.header("🚬 What's your habit?")
-    habit = st.radio("You hisap apa sekarang?", 
+    habit = st.radio("You layan apa sekarang?", 
                      ["Rokok (Cigarettes)", "Vape / Pod", "Dua-dua (Dual User)"])
     
-    freq = st.text_input("How heavy? (e.g., '1 kotak sehari', '1 pod 2 hari')", "Sikit-sikit je")
+    freq = st.text_input("Kerap mana? (e.g., '1 kotak sehari', '1 pod 3 hari')", "Sikit-sikit je")
     
     if st.button("Next ➡️", key="btn_habit"):
         st.session_state.profile['habit'] = habit
@@ -143,24 +152,25 @@ elif st.session_state.step == "onboarding_habit":
 # --- STEP 3: READINESS ---
 elif st.session_state.step == "onboarding_ready":
     st.header("💪 Readiness Check")
-    ready = st.slider("On scale 1-10, how ready are you to quit?", 1, 10, 5)
+    st.write("Jujur je, 1-10, berapa ready you nak stop?")
+    ready = st.slider("Scale", 1, 10, 5)
     
     if ready < 4:
-        st.info("It's okay not to be ready yet. We can just chat.")
+        st.info("Takpe, tak ready takpa. Kita sembang santai je.")
     elif ready > 7:
-        st.success("Semangat yang padu! Let's do this.")
+        st.success("Fuh semangat! Jom kita try.")
         
-    if st.button("Start Chatting 💬", key="btn_ready"):
+    if st.button("Jom Sembang 💬", key="btn_ready"):
         st.session_state.profile['readiness'] = ready
         # Initial greeting from Bot
-        greeting = f"Alright profile set! ✅\n\nUmur: {st.session_state.profile['age']}, Habit: {st.session_state.profile['habit']}.\n\nSo bro/sis, apa yang paling susah pasal nak quit ni? Gian ke habit lepak?"
+        greeting = f"Okay cun! Profile dah set. \n\nSo, apa plan? Nak try 'Cold Turkey' (berhenti terus) atau 'Slow-slow'? Atau nak tips elak gian?"
         st.session_state.messages.append({"role": "assistant", "content": greeting})
         st.session_state.step = "chat_active"
         st.rerun()
 
 # --- STEP 4: MAIN CHAT ---
 elif st.session_state.step == "chat_active":
-    st.subheader("💬 Chat with M3QuitBuddy")
+    st.subheader("💬 M3QuitBuddy")
     
     # Display Chat History
     for msg in st.session_state.messages:
@@ -168,5 +178,5 @@ elif st.session_state.step == "chat_active":
             st.markdown(msg["content"])
 
     # Chat Input
-    if prompt := st.chat_input("Type something... (e.g., 'Aku stress la')"):
+    if prompt := st.chat_input("Tanya apa je... (e.g., 'Bahaya ke stop mengejut?')"):
         handle_chat_response(prompt)
